@@ -77,39 +77,26 @@ def flatten_json(data: dict) -> dict:
 
 
 if __name__ == '__main__':
-    # Set GCP credentials and UTF-8 encoding for Python
+     # Set GCP credentials and UTF-8 encoding for Python
     os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = r'C:\Users\harsh\Downloads\Study\Spark Lectures\GCP_Practice\gcp_learning_project_1\harshal-learning-08-24-64e3eed93ca1.json'
     os.environ['PYTHONIOENCODING'] = 'utf-8'
 
-
-    # Step 1: Initialize Spark session
-    # creating a SparkSession object named `spark`
-    spark = SparkSession.builder.master("local[*]").appName('Historical Data Load').getOrCreate()
+    # Initialize Spark session
+    spark = SparkSession.builder \
+        .master("local[*]") \
+        .appName('Historical Data Load') \
+        .getOrCreate()
     
     # Set log level directly for the Spark application
-    new_log_level = "ERROR"
-    spark.sparkContext.setLogLevel(new_log_level)
-
+    spark.sparkContext.setLogLevel("ERROR")
 
     # Step 2: Fetch earthquake data from the API
-    def fetch_earthquake_data():
-        """
-        The function fetches earthquake data from a specified URL.
-        :return: The function `fetch_earthquake_data()` is returning the result of a request made to the
-        specified URL "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.geojson".
-        """
-        url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.geojson"
-        
-        return request_url(url)  
-    
+    url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.geojson"
+    data = request_url(url)
     
     # Step 3: creating a new gcs bucket
     bucket_name = 'earthquake_analysis_by_hp'
     creating_bucket_object = create_bucket(bucket_name)
-    
-    # Retrieve data from the URL response
-    data = fetch_earthquake_data()
-    
     
     # Step 4: Upload raw data to Google Cloud Storage (GCS)
     # This block of code is responsible for uploading the raw earthquake data fetched from the API to
@@ -175,10 +162,10 @@ if __name__ == '__main__':
 
 
     # Step 10: This block of code is performing the following trasnformation operations on the `earthquake_df` DataFrame:
-    earthquake_df = earthquake_df.withColumn('time', from_unixtime(col('time').cast('long')/1000, format="yyyy-MM-dd HH:mm:ss"))
-    earthquake_df = earthquake_df.withColumn('updated', from_unixtime(col('updated').cast('long')/1000, format="yyyy-MM-dd HH:mm:ss"))
-    earthquake_df = earthquake_df.withColumn('area', regexp_extract(col("place"), r'of\s*(.*)', 1))
-    earthquake_df = earthquake_df.withColumn('ingestion_dt', current_timestamp())
+    earthquake_df = earthquake_df.withColumn('time', from_unixtime(col('time').cast('long')/1000, format="yyyy-MM-dd HH:mm:ss")) \
+                                   .withColumn('updated', from_unixtime(col('updated').cast('long')/1000, format="yyyy-MM-dd HH:mm:ss")) \
+                                   .withColumn('area', regexp_extract(col("place"), r'of\s*(.*)', 1)) \
+                                   .withColumn('ingestion_dt', current_timestamp())
 
     
     # Step 11: Show the DataFrame and its schema
@@ -204,10 +191,11 @@ if __name__ == '__main__':
     # Cloud Storage (GCS) URI into that BigQuery table.
     project_id = "harshal-learning-08-24"
     dataset_id = "earthquake_analysis"
-    table_id = f"{project_id}.{dataset_id}.flattned_historical_data"
+    table_id = f"{project_id}.{dataset_id}.flattned_historical_data_by_json"
     bucket_name = "earthquake_analysis_by_hp"
     gcs_blob_name = "pyspark/Silver/flattened_and_transformed_historical_data_20241025.json"
     gcs_uri = f"gs://{bucket_name}/{gcs_blob_name}"
+    
     schema = [
         bigquery.SchemaField("mag", "FLOAT", mode="REQUIRED"),
         bigquery.SchemaField("place", "STRING", mode="REQUIRED"),
@@ -243,3 +231,6 @@ if __name__ == '__main__':
     ]
     
     load_data_to_bigquery_from_gcs(gcs_uri, project_id, dataset_id, table_id, schema)
+    
+    # Stop Spark session
+    spark.stop()
