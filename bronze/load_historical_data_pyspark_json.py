@@ -111,7 +111,7 @@ if __name__ == '__main__':
 
     # Step 5: Read the uploaded JSON data from GCS
     bucket_name = 'earthquake_analysis_by_hp'
-    blob_name = 'pyspark/landing/historical_data_20241023.json'
+    blob_name = f'pyspark/landing/{destination_blob_name}'
     gcs_json_data = read_json_from_gcs(bucket_name, blob_name)
 
 
