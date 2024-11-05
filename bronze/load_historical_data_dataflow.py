@@ -12,7 +12,7 @@ class FetchDataFromUrl(beam.DoFn):
     def __init__(self, url):
         self.url = url
 
-    def process(self):
+    def process(self, elment):
     # yields the JSON representation of the data or an error message if the data retrieval fails.
         data = request_url(self.url)
         if data is not None:
@@ -73,8 +73,8 @@ class FlattenJSON(beam.DoFn):
 # convert Unix timestamps to ISO format in IST timezone
 class UnixToIst(beam.DoFn):
     def process(self, record):
-        time = record.get('time')
-        updated = record.get('updated')
+        time = record.get('time', 0)
+        updated = record.get('updated', 0)
         if time and updated:
             record['time'] = datetime.fromtimestamp(time / 1000)  
             record['updated'] = datetime.fromtimestamp(updated / 1000) 
@@ -88,7 +88,7 @@ class AddingAreaField(beam.DoFn):
         if place and 'of' in place:
             record['area'] = place.split('of')[1].strip(' ')
         else:
-            record['area'] = None
+            record['area'] = place
         yield record
 
 
@@ -100,15 +100,15 @@ class IngestionDate(beam.DoFn):
 
 
 if __name__ == '__main__':
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = r'C:\Users\harsh\Downloads\Study\Spark Lectures\GCP_Practice\gcp_learning_project_1\harshal-learning-08-24-64e3eed93ca1.json'
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = r'C:\Users\harsh\Downloads\Study\Spark Lectures\Projects\earthquake_ingesion_hp\earthquake-analysis-440806-e4fcdf0763f4.json'
 
     options = PipelineOptions()
     google_cloud_options = options.view_as(GoogleCloudOptions)
-    google_cloud_options.project = "harshal-learning-08-24"
+    google_cloud_options.project = "earthquake-analysis-440806"
     google_cloud_options.job_name = "loadParquetToBigQuery"
     google_cloud_options.region = "us-central1"
-    google_cloud_options.staging_location = "gs://dataproc-temp-us-central1-182872872661-b6tcgbau/stage_loc/"
-    google_cloud_options.temp_location = "gs://dataproc-temp-us-central1-182872872661-b6tcgbau/temp_loc/"
+    google_cloud_options.staging_location = "gs://dataproc-staging-us-central1-1041991067679-wndc42dq/stage_loc/"
+    google_cloud_options.temp_location = "gs://dataproc-temp-us-central1-1041991067679-qkiizwmb/temp_loc/"
     
     # Setup logging and error level
     logging.basicConfig(level=logging.ERROR)
@@ -117,7 +117,7 @@ if __name__ == '__main__':
     url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.geojson"
     
     # Create a new GCS bucket
-    bucket_name = 'earthquake_analysis_by_hp'
+    bucket_name = 'earthquake_analysis_by_hp_24'
     create_bucket(bucket_name)
     
     str_date = datetime.now().strftime('%Y%m%d')
@@ -206,7 +206,7 @@ if __name__ == '__main__':
         )
         
         # step 5: Write the parquet file from gcs to bigQuery table
-        bucket_name = "earthquake_analysis_by_hp"
+        bucket_name = "earthquake_analysis_by_hp_24"
         gcs_blob_name = "dataflow/silver/"
         gcs_uri = f"gs://{bucket_name}/{gcs_blob_name}"
         
@@ -252,7 +252,7 @@ if __name__ == '__main__':
             p
             | 'Reading Parquet Data From GCS' >> beam.io.ReadFromParquet(gcs_uri)
             | 'Writing Parquet Data To Bigquery' >> beam.io.WriteToBigQuery(
-                table="harshal-learning-08-24.earthquake_analysis.flattned_historical_data_by_parquet_by_dataflow",
+                table="earthquake-analysis-440806.earthquake_analysis.flattned_historical_data_by_parquet_by_dataflow",
                 schema=bq_schema,
                 write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE,  # Overwrite existing data
                 create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED

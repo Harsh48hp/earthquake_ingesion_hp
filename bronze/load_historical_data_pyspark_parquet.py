@@ -3,7 +3,7 @@ from util import request_url, create_bucket, upload_to_gcs, read_json_from_gcs, 
 from pyspark.sql.types import StructType, StructField, FloatType, StringType, IntegerType
 import json
 from datetime import datetime
-from pyspark.sql.functions import from_unixtime, col, regexp_extract, current_timestamp
+from pyspark.sql.functions import from_unixtime, col, regexp_extract, current_timestamp, when
 from google.cloud import bigquery
 
 
@@ -92,24 +92,24 @@ if __name__ == '__main__':
     
     
     # Step 3: creating a new gcs bucket
-    bucket_name = 'earthquake_analysis_by_hp'
+    bucket_name = 'earthquake_analysis_by_hp_24'
     creating_bucket_object = create_bucket(bucket_name)
     
     
     # Step 4: Upload raw data to Google Cloud Storage (GCS)
     # This block of code is responsible for uploading the raw earthquake data fetched from the API to
     # Google Cloud Storage (GCS) as a JSON file. Here's a breakdown of what each step is doing:
-    bucket_name = 'earthquake_analysis_by_hp'
+    bucket_name = 'earthquake_analysis_by_hp_24'
     str_date = datetime.now().strftime('%Y%m%d')
-    folder_path = "pyspark/landing/"
+    folder_path = "pyspark_dataproc/landing/"
     json_data = json.dumps(data)
     destination_blob_name = f'historical_data_{str_date}.json'
     upload_to_gcs(bucket_name, json_data, destination_blob_name, folder_path)
     
 
     # Step 5: Read the uploaded JSON data from GCS
-    bucket_name = 'earthquake_analysis_by_hp'
-    blob_name = f'pyspark/landing/{destination_blob_name}'
+    bucket_name = 'earthquake_analysis_by_hp_24'
+    blob_name = f'pyspark_dataproc/landing/{destination_blob_name}'
     gcs_json_data = read_json_from_gcs(bucket_name, blob_name)
 
 
@@ -162,7 +162,9 @@ if __name__ == '__main__':
     # Step 10: This block of code is performing the following trasnformation operations on the `earthquake_df` DataFrame:
     earthquake_df = earthquake_df.withColumn('time', from_unixtime(col('time').cast('long')/1000, format="yyyy-MM-dd HH:mm:ss")) \
                                    .withColumn('updated', from_unixtime(col('updated').cast('long')/1000, format="yyyy-MM-dd HH:mm:ss")) \
-                                   .withColumn('area', regexp_extract(col("place"), r'of\s*(.*)', 1)) \
+                                   .withColumn('area',
+                                                when(col("place").contains(" of "), regexp_extract(col("place"), r' of\s*(.*)', 1))
+                                                .otherwise(col("place")))\
                                    .withColumn('ingestion_dt', current_timestamp())
 
     
@@ -175,8 +177,8 @@ if __name__ == '__main__':
     # This block of code is responsible for uploading the flattened and transformed earthquake data
     # stored in a DataFrame (`earthquake_df`) to Google Cloud Storage (GCS) as a Parquet file. Here's a
     # breakdown of what each step is doing:
-    bucket_name = 'earthquake_analysis_by_hp'
-    folder_path = "pyspark/Silver/parquet/"
+    bucket_name = 'earthquake_analysis_by_hp_24'
+    folder_path = "pyspark_dataproc/Silver/parquet/"
     destination_blob_name = f'flattened_and_transformed_historical_data_{str_date}.parquet'
     gcs_path = f'gs://{bucket_name}/{folder_path}{destination_blob_name}'
     write_df_to_gcs_parquet(earthquake_df, bucket_name, folder_path, destination_blob_name)
@@ -186,11 +188,11 @@ if __name__ == '__main__':
     # step 13: Loading the data from gcs to bigquery
     # The code is defining a schema for a BigQuery table and then loading data from a Google
     # Cloud Storage (GCS) URI into that BigQuery table.
-    project_id = "harshal-learning-08-24"
+    project_id = "earthquake-analysis-440806"
     dataset_id = "earthquake_analysis"
     table_id = f"{project_id}.{dataset_id}.flattned_historical_data_by_parquet"
-    bucket_name = "earthquake_analysis_by_hp"
-    gcs_blob_name = "pyspark/Silver/parquet/"
+    bucket_name = "earthquake_analysis_by_hp_24"
+    gcs_blob_name = "pyspark_dataproc/Silver/parquet/"
     gcs_uri = f"gs://{bucket_name}/{gcs_blob_name}"
     
     schema = [
