@@ -4,6 +4,7 @@ import logging
 from google.cloud import storage, bigquery
 from google.cloud.exceptions import NotFound, Conflict
 
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ def request_url(url):
     
 
 def create_bucket(bucket_name):
-    """Creates a new bucket.
+    """Creates a new bucket or retrieves the if existed.
     
     Args:
         bucket_name (str): Name of the bucket to create.
@@ -46,6 +47,7 @@ def create_bucket(bucket_name):
         bucket = storage_client.bucket(bucket_name)
 
     return bucket
+
 
 
 def upload_to_gcs(bucket_name, data, destination_blob_name, folder_path):

@@ -173,10 +173,9 @@ if __name__ == '__main__':
     earthquake_df.printSchema()
 
 
-    # Step 12: Upload fltanned and transformed data to Google Cloud Storage (GCS)
+    # Step 12: Upload fltanned and transformed data to Google Cloud Storage (GCS) as Parquet
     # This block of code is responsible for uploading the flattened and transformed earthquake data
-    # stored in a DataFrame (`earthquake_df`) to Google Cloud Storage (GCS) as a Parquet file. Here's a
-    # breakdown of what each step is doing:
+    # stored in a DataFrame (`earthquake_df`) to Google Cloud Storage (GCS) as a Parquet file. 
     bucket_name = 'earthquake_analysis_by_hp_24'
     folder_path = "pyspark_dataproc/Silver/parquet/"
     destination_blob_name = f'flattened_and_transformed_historical_data_{str_date}.parquet'
@@ -233,3 +232,7 @@ if __name__ == '__main__':
     
     # Stop Spark session
     spark.stop()
+
+# Run below command in gcloud console
+# 
+# gcloud dataproc jobs submit pyspark gs://earthquake_analysis_by_hp_24/pyspark_dataproc/bronze/load_historical_data_pyspark_parquet.py --cluster=harshal-bwt-session-dataproc-cluster-24 --region=us-central1 --files=gs://earthquake_analysis_by_hp_24/pyspark_dataproc/bronze/util.py --properties="spark.executor.memory=2g,spark.driver.memory=2g"
