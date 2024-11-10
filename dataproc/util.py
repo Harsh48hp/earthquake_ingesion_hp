@@ -49,7 +49,6 @@ def create_bucket(bucket_name):
     return bucket
 
 
-
 def upload_to_gcs(bucket_name, data, destination_blob_name, folder_path):
     """Uploads JSON data to Google Cloud Storage.
     
@@ -65,6 +64,7 @@ def upload_to_gcs(bucket_name, data, destination_blob_name, folder_path):
 
     blob.upload_from_string(data)
     logger.info(f"Uploaded response data to {destination_blob_name}.")
+
 
 
 def write_df_to_gcs_parquet(dataframe, bucket_name, folder_path, destination_blob_name):
@@ -136,56 +136,6 @@ def load_parquet_data_to_bigquery_from_gcs(gcs_uri, project_id, dataset_id, tabl
     
     load_job = client.load_table_from_uri(
         f"{gcs_uri}*.parquet",
-        table_id,
-        location="us-central1",  
-        job_config=job_config,
-    )
-
-    try:
-        load_job.result()  # Wait for the job to complete
-        destination_table_id = f"{project_id}.{dataset_id}.{table_id}"
-        logger.info(f"Loaded {load_job.output_rows} rows into {destination_table_id}.")
-    except Exception as e:
-        logger.error("Job failed with error: %s", e)
-        if hasattr(e, 'errors'):
-            for error in e.errors:
-                logger.error("Error: %s", error)
-
-
-def load_data_to_bigquery_from_gcs(gcs_uri, project_id, dataset_id, table_id, schema):
-    """Loads data from GCS into a BigQuery table.
-    
-    Args:
-        gcs_uri (str): GCS URI for the data.
-        project_id (str): Project ID for the BigQuery dataset.
-        dataset_id (str): Dataset ID in BigQuery.
-        table_id (str): Table ID in BigQuery.
-        schema (list): Schema of the BigQuery table.
-    """
-    client = bigquery.Client(project=project_id)
-    
-    logger.info("Currently working in project: %s", client.project)
-    
-    dataset_full_id = f"{client.project}.{dataset_id}"
-    
-    try:
-        dataset = client.get_dataset(dataset_full_id)  
-        logger.info(f"Dataset {dataset_full_id} already exists.")
-    except NotFound:
-        dataset = bigquery.Dataset(dataset_full_id)
-        dataset.location = "us-central1"  
-        dataset = client.create_dataset(dataset)  
-        logger.info(f"Created dataset {dataset_full_id}")
-    
-    job_config = bigquery.LoadJobConfig(
-        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
-        schema=schema,
-        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
-        max_bad_records=50
-    )
-    
-    load_job = client.load_table_from_uri(
-        gcs_uri,
         table_id,
         location="us-central1",  
         job_config=job_config,
