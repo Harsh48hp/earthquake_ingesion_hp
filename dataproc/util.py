@@ -1,8 +1,18 @@
+###########################################################################################################
+"""
+file_name = util.py
+description = utility folder containg all the necessary functions for historical data to upload to bigquery
+date = 2024/11/02
+version = 1
+
+"""
+############################################################################################################
+from google.cloud import storage, bigquery
+from google.cloud.exceptions import NotFound, Conflict
 import requests
 import json
 import logging
-from google.cloud import storage, bigquery
-from google.cloud.exceptions import NotFound, Conflict
+
 
 
 # Configure logging
@@ -62,12 +72,11 @@ def upload_to_gcs(bucket_name, data, destination_blob_name, folder_path):
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(f"{folder_path}{destination_blob_name}")
 
-    blob.upload_from_string(data)
+    blob.upload_from_string(data, content_type='application/json')
     logger.info(f"Uploaded response data to {destination_blob_name}.")
 
 
-
-def write_df_to_gcs_parquet(dataframe, bucket_name, folder_path, destination_blob_name):
+def write_df_to_gcs_parquet(dataframe, bucket_name, folder_path, destination_blob_name, str_date):
     """Writes a DataFrame in Parquet format to Google Cloud Storage.
     
     Args:
@@ -76,7 +85,7 @@ def write_df_to_gcs_parquet(dataframe, bucket_name, folder_path, destination_blo
         folder_path (str): Folder path within the bucket.
         destination_blob_name (str): Name of the Parquet file to be saved.
     """
-    gcs_path = f'gs://{bucket_name}/{folder_path}{destination_blob_name}'
+    gcs_path = f'gs://{bucket_name}/{folder_path}{str_date}/{destination_blob_name}'
     
     # Write DataFrame to GCS in Parquet format
     dataframe.write.mode('overwrite').parquet(gcs_path)
@@ -131,7 +140,7 @@ def load_parquet_data_to_bigquery_from_gcs(gcs_uri, project_id, dataset_id, tabl
     job_config = bigquery.LoadJobConfig(
         source_format=bigquery.SourceFormat.PARQUET,
         schema=schema,
-        write_disposition=bigquery.WriteDisposition.WRITE_APPEND
+        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE
     )
     
     load_job = client.load_table_from_uri(
