@@ -15,7 +15,7 @@ default_args = {
 dag = DAG(
     dag_id='job_submit_loading_daily_data_earthquake_analysis',
     default_args=default_args,
-    schedule_interval = '0 8 * * *',
+    schedule_interval = '0 15 * * *',
     catchup=False,
     description='Load earthquake daily data, transform, and apeend in historical data in BigQuery through GCS'
 )
@@ -79,40 +79,4 @@ end = EmptyOperator(task_id='end', trigger_rule=TriggerRule.NONE_FAILED_OR_SKIPP
 # Define task dependencies
 start >> create_cluster >> submit_pyspark_job >> delete_cluster >> end
   
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+  
