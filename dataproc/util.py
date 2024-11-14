@@ -29,12 +29,13 @@ def request_url(url):
     Returns:
         dict: JSON response data or None if the request fails.
     """
-    response = requests.get(url=url)
-    
-    if response.status_code == 200:
+    try:
+        response = requests.get(url=url, timeout=10)
+        response.raise_for_status()
+        logger.info(f"Successfully retrieved data from {url}")
         return response.json()
-    else:
-        logger.error(f"Request failed with status code: {response.status_code}")   
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request to {url} failed: {e}")
         return None
     
 
@@ -51,10 +52,17 @@ def create_bucket(bucket_name):
     
     try:
         bucket = storage_client.create_bucket(bucket_name, location="us-central1")
-        logger.info(f"Created bucket {bucket.name} in location {bucket.location}")
+        logger.info(f"Created bucket '{bucket.name}' in location '{bucket.location}'")
     except Conflict:
-        logger.warning(f"Bucket {bucket_name} already exists. Retrieving existing bucket.")
         bucket = storage_client.bucket(bucket_name)
+        if bucket.exists():
+            logger.warning(f"Bucket '{bucket_name}' already exists. Retrieved existing bucket.")
+        else:
+            logger.error(f"Bucket '{bucket_name}' could not be created or retrieved.")
+            return None
+    except Exception as e:
+        logger.error(f"An error occurred while creating or retrieving bucket '{bucket_name}': {e}")
+        return None
 
     return bucket
 
@@ -87,10 +95,12 @@ def write_df_to_gcs_parquet(dataframe, bucket_name, folder_path, destination_blo
     """
     gcs_path = f'gs://{bucket_name}/{folder_path}{str_date}/{destination_blob_name}'
     
-    # Write DataFrame to GCS in Parquet format
-    dataframe.write.mode('overwrite').parquet(gcs_path)
-    logger.info(f"Wrote DataFrame to {gcs_path}.")
-
+    try:
+        # Write DataFrame to GCS in Parquet format
+        dataframe.write.mode('overwrite').parquet(gcs_path)
+        logger.info(f"Wrote DataFrame to {gcs_path}.")
+    except Exception as e:
+            logging.error(f"Error uploading DataFrame: {e}")
 
 def read_json_from_gcs(bucket_name, blob_name):
     """Reads a JSON file from GCS and returns it as a dictionary or list.
@@ -110,8 +120,8 @@ def read_json_from_gcs(bucket_name, blob_name):
     
     logger.info(f"Read JSON data from {blob_name}.")
     return json_data
-
-
+                
+                
 def load_parquet_data_to_bigquery_from_gcs(gcs_uri, project_id, dataset_id, table_id, schema):
     """Loads Parquet data from GCS into a BigQuery table.
     
@@ -152,10 +162,10 @@ def load_parquet_data_to_bigquery_from_gcs(gcs_uri, project_id, dataset_id, tabl
 
     try:
         load_job.result()  # Wait for the job to complete
-        destination_table_id = f"{project_id}.{dataset_id}.{table_id}"
-        logger.info(f"Loaded {load_job.output_rows} rows into {destination_table_id}.")
+        logger.info(f"Loaded {load_job.output_rows} rows into {gcs_uri}.")
     except Exception as e:
         logger.error("Job failed with error: %s", e)
         if hasattr(e, 'errors'):
             for error in e.errors:
                 logger.error("Error: %s", error)
+

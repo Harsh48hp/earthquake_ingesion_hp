@@ -1,238 +1,147 @@
-from pyspark.sql import SparkSession
-from util import request_url, create_bucket, upload_to_gcs, read_json_from_gcs, write_df_to_gcs_parquet, load_parquet_data_to_bigquery_from_gcs
-from pyspark.sql.types import StructType, StructField, FloatType, StringType, IntegerType
-import json
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions, GoogleCloudOptions
+from dynamic_methods import FetchDataFromUrl, ExtractFeatures, FlattenJSON, UnixToIst, IngestionDate, AddingAreaField
+from schema_data import SchemaConverter
+from util import create_bucket
+import os
+import logging
 from datetime import datetime
-from pyspark.sql.functions import from_unixtime, col, regexp_extract, current_timestamp, when
-from google.cloud import bigquery
 
 
-# Function to process the response and extract the required fields
-def extract_properties(response: dict) -> dict:
-    """
-    Extracts properties and coordinates from the earthquake response data.
-
-    Args:
-    response (dict): Single earthquake event response from JSON.
-
-    Returns:
-    dict: A processed dictionary containing earthquake details with longitude, latitude, and depth.
-    """
-    properties = response['properties']
-    properties['longitude'] = float(response['geometry']['coordinates'][0])
-    properties['latitude'] = float(response['geometry']['coordinates'][1])
-    properties['depth'] = float(response['geometry']['coordinates'][2])
-    return properties
+def set_pipeline_options():
+    # Initialize PipelineOptions and GoogleCloudOptions
+    options = PipelineOptions()
+    google_cloud_options = options.view_as(GoogleCloudOptions)
+    google_cloud_options.project = "earthquake-analysis-440806"
+    google_cloud_options.job_name = "loadParquetToBigQuery"
+    google_cloud_options.region = "us-central1"
+    google_cloud_options.staging_location = "gs://dataproc-staging-us-central1-1041991067679-wndc42dq/stage_loc/"
+    google_cloud_options.temp_location = "gs://dataproc-temp-us-central1-1041991067679-qkiizwmb/temp_loc/"
+    return options
 
 
-# Function to flatten and normalize the JSON data for structured storage
-def flatten_json(data: dict) -> dict:
-    """
-    Flattens the earthquake JSON data, ensuring appropriate types and default values.
+def fetch_data_from_url(pipeline, url):
+    # Step 1: Fetch Data from URL
+    fetch_results = (
+        pipeline
+        | 'Create API request' >> beam.Create([None])  # Trigger the pipeline
+        | 'Fetch Data From API' >> beam.ParDo(FetchDataFromUrl(url)).with_outputs('error', main='main')
+    )
+    logging.info("Step 1: Fetching data from API")
+    return fetch_results
 
-    Args:
-    data (dict): A single earthquake record.
 
-    Returns:
-    dict: A flattened and normalized record.
-    """
-    field_types = {
-        "mag": (float, 0.0),
-        "place": (str, ''),
-        "time": (str, '0'),
-        "updated": (str, '0'),
-        "tz": (str, ''),
-        "url": (str, ''),
-        "detail": (str, ''),
-        "felt": (int, 0),
-        "cdi": (float, 0.0),
-        "mmi": (float, 0.0),
-        "alert": (str, ''),
-        "status": (str, ''),
-        "tsunami": (int, 0),
-        "sig": (int, 0),
-        "net": (str, ''),
-        "code": (str, ''),
-        "ids": (str, ''),
-        "sources": (str, ''),
-        "types": (str, ''),
-        "nst": (int, 0),
-        "dmin": (float, 0.0),
-        "rms": (float, 0.0),
-        "gap": (float, 0.0),
-        "magType": (str, ''),
-        "type": (str, ''),
-        "title": (str, ''),
-        "longitude": (float, 0.0),
-        "latitude": (float, 0.0),
-        "depth": (float, 0.0)
-    }
+def write_to_gcs_as_json(pipeline, fetch_results, bucket_name, destination_blob_name):
+    # Step 2: Write Data to GCS as JSON
+    written_data = (
+        fetch_results.main  # Use the main output (successful fetches)
+        | 'Write To GCS in JSON' >> beam.io.WriteToText(
+            f'gs://{bucket_name}/{destination_blob_name}',
+            file_name_suffix='',  # No suffix added to the file name
+            shard_name_template='',  # No sharding (single file)
+            num_shards=1  # Single shard (single file output)
+        )
+    )
+    logging.info("Step 2: Data written to GCS as JSON")
+
+
+def process_and_transform_data(pipeline, bucket_name, destination_blob_name):
+    # Step 3: Read and Process Data
+    logging.info("Step 3: Processing and transforming the data")
+    lines = (
+        pipeline
+        | 'Read From GCS' >> beam.io.ReadFromText(f'gs://{bucket_name}/{destination_blob_name}')
+        | 'Extract Features' >> beam.ParDo(ExtractFeatures())
+        | 'Flatten The Data' >> beam.ParDo(FlattenJSON())
+        | 'Converting UnixTime to IST' >> beam.ParDo(UnixToIst())
+        | 'Adding Area Field' >> beam.ParDo(AddingAreaField())
+        | 'Adding Ingestion Date' >> beam.ParDo(IngestionDate())
+    )
+    return lines
+
+
+def write_to_gcs_as_parquet(pipeline, lines, bucket_name, str_date):
+    # Step 4: Write Transformed Data to GCS as Parquet
+    logging.info("Step 4: Writing transformed data to GCS as Parquet")
+    destination_parquet_blob_name = f'dataflow/silver/{str_date}/historical_flatten_data_{str_date}.parquet'
+
+    # Define the schema for Parquet file
+    parquet_schema = SchemaConverter.get_pyarrow_parquet_schema()
+
+    written_parquet_data = (
+        lines
+        | 'Write Flatten Data to GCS in Parquet' >> beam.io.parquetio.WriteToParquet(
+            f'gs://{bucket_name}/{destination_parquet_blob_name}',
+            schema=parquet_schema,
+            num_shards=1  # Single file output
+        )
+    )
+    logging.info("Step 4: Data transformed and written to GCS in Parquet")
+
+
+def write_to_bigquery(pipeline, bucket_name):
+    # Step 5: Write Parquet Data from GCS to BigQuery
+    logging.info("Step 5: Writing Parquet data from GCS to BigQuery")
+    gcs_uri = f"gs://{bucket_name}/dataflow/silver/{datetime.now().strftime('%Y%m%d')}/"
     
-    # Convert fields to appropriate types using the field_types dictionary
-    for field, (field_type, default_value) in field_types.items():
-        data[field] = field_type(data.get(field, default_value)) if data.get(field) is not None else default_value
-    
-    return data
+    # Define the schema for BigQuery table
+    bq_schema = SchemaConverter.get_bigquery_schema()
+
+    write_to_bigquery = (
+        pipeline
+        | 'Read Parquet from GCS' >> beam.io.ReadFromParquet(gcs_uri)
+        | 'Write Parquet Data to BigQuery' >> beam.io.WriteToBigQuery(
+            table="earthquake-analysis-440806.earthquake_analysis.flattened_historical_parquet_data_by_dataflow_pipeline",
+            schema=bq_schema,
+            write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE,  # Overwrite existing data
+            create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED  # Create table if not exists
+        )
+    )
+    logging.info("Step 5: Parquet data written to BigQuery")
 
 
 if __name__ == '__main__':
-    # Initialize Spark session
-    spark = SparkSession.builder \
-        .master("local[*]") \
-        .appName('Historical Data Load By Parquet') \
-        .getOrCreate()
-    
-    # Set log level directly for the Spark application
-    spark.sparkContext.setLogLevel("ERROR")
+    # Set the environment for Google Cloud authentication
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = r'C:\Users\harsh\Downloads\Study\Spark Lectures\Projects\earthquake_ingesion_hp\earthquake-analysis-440806-e4fcdf0763f4.json'
 
+    # Initialize logging
+    logging.basicConfig(level=logging.INFO)
 
-    # Step 2: Fetch earthquake data from the API
+    # Define the source URL for earthquake data
     url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.geojson"
-    data = request_url(url)
+    logging.info(f"Data source URL: {url}")
     
-    
-    # Step 3: creating a new gcs bucket
+    # Create a GCS bucket (if not already created)
     bucket_name = 'earthquake_analysis_by_hp_24'
-    creating_bucket_object = create_bucket(bucket_name)
+    create_bucket(bucket_name)
+    logging.info(f"Created GCS bucket: {bucket_name}")
     
-    
-    # Step 4: Upload raw data to Google Cloud Storage (GCS)
-    # This block of code is responsible for uploading the raw earthquake data fetched from the API to
-    # Google Cloud Storage (GCS) as a JSON file. Here's a breakdown of what each step is doing:
-    bucket_name = 'earthquake_analysis_by_hp_24'
+    # Define the destination path and file name
     str_date = datetime.now().strftime('%Y%m%d')
-    folder_path = "pyspark_dataproc/landing/"
-    json_data = json.dumps(data)
-    destination_blob_name = f'historical_data_{str_date}.json'
-    upload_to_gcs(bucket_name, json_data, destination_blob_name, folder_path)
+    destination_blob_name = f'dataflow/landing/historical_data_{str_date}.json'
+
+    # Set pipeline options
+    options = set_pipeline_options()
+
+    # Run the pipeline steps
+    with beam.Pipeline(options=options) as p:
+        # Step 1: Fetch Data from URL 
+        fetch_results = fetch_data_from_url(p, url)
+        
+        # Step 2: Write Data to GCS as JSON
+        write_to_gcs_as_json(p, fetch_results, bucket_name, destination_blob_name)
+
+    with beam.Pipeline(options=options) as p2:
+        # Step 3: Process and transform the data
+        lines = process_and_transform_data(p2, bucket_name, destination_blob_name)
+
+        # Step 4: Write Transformed Data to GCS as Parquet
+        write_to_gcs_as_parquet(p2, lines, bucket_name, str_date)
     
-
-    # Step 5: Read the uploaded JSON data from GCS
-    bucket_name = 'earthquake_analysis_by_hp_24'
-    blob_name = f'pyspark_dataproc/landing/{destination_blob_name}'
-    gcs_json_data = read_json_from_gcs(bucket_name, blob_name)
+    with beam.Pipeline(options=options) as p3:
+        # Step 5: Write Parquet Data from GCS to BigQuery
+        write_to_bigquery(p3, bucket_name)
 
 
-    # Step 6: Extract the 'features' section from the JSON response
-    earthquake_records = gcs_json_data['features']
-    
-    
-    # Step 7: Process the data into a list of flattened records
-    processed_records = [flatten_json(extract_properties(records)) for records in earthquake_records]
+    logging.info("Pipeline execution completed successfully")
 
-
-    # Step 8: Define the schema for the DataFrame
-    earthquake_schema = StructType([
-        StructField("mag", FloatType(), True),
-        StructField("place", StringType(), True),
-        StructField("time", StringType(), True),
-        StructField("updated", StringType(), True),
-        StructField("tz", StringType(), True),
-        StructField("url", StringType(), True),
-        StructField("detail", StringType(), True),
-        StructField("felt", IntegerType(), True),
-        StructField("cdi", FloatType(), True),
-        StructField("mmi", FloatType(), True),
-        StructField("alert", StringType(), True),
-        StructField("status", StringType(), True),
-        StructField("tsunami", IntegerType(), True),
-        StructField("sig", IntegerType(), True),
-        StructField("net", StringType(), True),
-        StructField("code", StringType(), True),
-        StructField("ids", StringType(), True),
-        StructField("sources", StringType(), True),
-        StructField("types", StringType(), True),
-        StructField("nst", IntegerType(), True),
-        StructField("dmin", FloatType(), True),
-        StructField("rms", FloatType(), True),
-        StructField("gap", FloatType(), True),
-        StructField("magType", StringType(), True),
-        StructField("type", StringType(), True),
-        StructField("title", StringType(), True),
-        StructField("longitude", FloatType(), True),
-        StructField("latitude", FloatType(), True),
-        StructField("depth", FloatType(), True)
-    ])
-
-
-    # Step 9: Create the DataFrame with the flattened data and schema
-    earthquake_df = spark.createDataFrame(processed_records, earthquake_schema)
-
-
-    # Step 10: This block of code is performing the following trasnformation operations on the `earthquake_df` DataFrame:
-    earthquake_df = earthquake_df.withColumn('time', from_unixtime(col('time').cast('long')/1000, format="yyyy-MM-dd HH:mm:ss")) \
-                                   .withColumn('updated', from_unixtime(col('updated').cast('long')/1000, format="yyyy-MM-dd HH:mm:ss")) \
-                                   .withColumn('area',
-                                                when(col("place").contains(" of "), regexp_extract(col("place"), r' of\s*(.*)', 1))
-                                                .otherwise(col("place")))\
-                                   .withColumn('ingestion_dt', current_timestamp())
-
-    
-    # Step 11: Show the DataFrame and its schema
-    earthquake_df.show(truncate=False)
-    earthquake_df.printSchema()
-
-
-    # Step 12: Upload fltanned and transformed data to Google Cloud Storage (GCS) as Parquet
-    # This block of code is responsible for uploading the flattened and transformed earthquake data
-    # stored in a DataFrame (`earthquake_df`) to Google Cloud Storage (GCS) as a Parquet file. 
-    bucket_name = 'earthquake_analysis_by_hp_24'
-    folder_path = "pyspark_dataproc/Silver/parquet/"
-    destination_blob_name = f'flattened_and_transformed_historical_data_{str_date}.parquet'
-    gcs_path = f'gs://{bucket_name}/{folder_path}{destination_blob_name}'
-    write_df_to_gcs_parquet(earthquake_df, bucket_name, folder_path, destination_blob_name)
-    print(f"DataFrame successfully written to {gcs_path}")
-    
-    
-    # step 13: Loading the data from gcs to bigquery
-    # The code is defining a schema for a BigQuery table and then loading data from a Google
-    # Cloud Storage (GCS) URI into that BigQuery table.
-    project_id = "earthquake-analysis-440806"
-    dataset_id = "earthquake_analysis"
-    table_id = f"{project_id}.{dataset_id}.flattned_historical_data_by_parquet"
-    bucket_name = "earthquake_analysis_by_hp_24"
-    gcs_blob_name = "pyspark_dataproc/Silver/parquet/"
-    gcs_uri = f"gs://{bucket_name}/{gcs_blob_name}"
-    
-    schema = [
-        bigquery.SchemaField("mag", "FLOAT", mode="REQUIRED"),
-        bigquery.SchemaField("place", "STRING", mode="REQUIRED"),
-        bigquery.SchemaField("time", "STRING", mode="REQUIRED"),
-        bigquery.SchemaField("updated", "STRING", mode="REQUIRED"),
-        bigquery.SchemaField("tz", "STRING", mode="NULLABLE"),
-        bigquery.SchemaField("url", "STRING", mode="NULLABLE"),
-        bigquery.SchemaField("detail", "STRING", mode="NULLABLE"),
-        bigquery.SchemaField("felt", "INTEGER", mode="NULLABLE"),
-        bigquery.SchemaField("cdi", "FLOAT", mode="NULLABLE"),
-        bigquery.SchemaField("mmi", "FLOAT", mode="NULLABLE"),
-        bigquery.SchemaField("alert", "STRING", mode="NULLABLE"),
-        bigquery.SchemaField("status", "STRING", mode="NULLABLE"),
-        bigquery.SchemaField("tsunami", "INTEGER", mode="NULLABLE"),
-        bigquery.SchemaField("sig", "INTEGER", mode="NULLABLE"),
-        bigquery.SchemaField("net", "STRING", mode="NULLABLE"),
-        bigquery.SchemaField("code", "STRING", mode="NULLABLE"),
-        bigquery.SchemaField("ids", "STRING", mode="NULLABLE"),
-        bigquery.SchemaField("sources", "STRING", mode="NULLABLE"),
-        bigquery.SchemaField("types", "STRING", mode="NULLABLE"),
-        bigquery.SchemaField("nst", "INTEGER", mode="NULLABLE"),
-        bigquery.SchemaField("dmin", "FLOAT", mode="NULLABLE"),
-        bigquery.SchemaField("rms", "FLOAT", mode="NULLABLE"),
-        bigquery.SchemaField("gap", "FLOAT", mode="NULLABLE"),
-        bigquery.SchemaField("magType", "STRING", mode="NULLABLE"),
-        bigquery.SchemaField("type", "STRING", mode="NULLABLE"),
-        bigquery.SchemaField("title", "STRING", mode="NULLABLE"),
-        bigquery.SchemaField("longitude", "FLOAT", mode="REQUIRED"),
-        bigquery.SchemaField("latitude", "FLOAT", mode="REQUIRED"),
-        bigquery.SchemaField("depth", "FLOAT", mode="REQUIRED"),
-        bigquery.SchemaField("area", "STRING", mode="REQUIRED"),
-        bigquery.SchemaField("ingestion_dt", "TIMESTAMP", mode="REQUIRED")
-    ]
-    
-    load_parquet_data_to_bigquery_from_gcs(gcs_uri, project_id, dataset_id, table_id, schema)
-    
-    # Stop Spark session
-    spark.stop()
-
-# Run below command in gcloud console
-# 
-# gcloud dataproc jobs submit pyspark gs://earthquake_analysis_by_hp_24/pyspark_dataproc/bronze/load_historical_data_pyspark_parquet.py --cluster=harshal-bwt-session-dataproc-cluster-24 --region=us-central1 --files=gs://earthquake_analysis_by_hp_24/pyspark_dataproc/bronze/util.py --properties="spark.executor.memory=2g,spark.driver.memory=2g"
