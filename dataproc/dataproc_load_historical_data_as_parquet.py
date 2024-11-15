@@ -161,11 +161,7 @@ if __name__ == '__main__':
 
 # gcloud dataproc jobs submit pyspark gs://earthquake_analysis_by_hp_24/pyspark_dataproc_testing/bronze/dataproc_load_historical_data_as_parquet.py --cluster=harshal-bwt-session-dataproc-cluster-24 --region=us-central1 --files=gs://earthquake_analysis_by_hp_24/pyspark_dataproc_testing/bronze/util.py,gs://earthquake_analysis_by_hp_24/pyspark_dataproc_testing/bronze/dynamic_methods.py --properties="spark.executor.memory=2g,spark.driver.memory=2g"
 
-# gcloud dataproc jobs submit pyspark gs://earthquake_analysis_by_hp_24/pyspark_dataproc_testing/bronze/submit_job.py --cluster=harshal-bwt-session-dataproc-cluster-24 --region=us-central1 --files=gs://earthquake_analysis_by_hp_24/pyspark_dataproc_testing/bronze/util.py,gs://earthquake_analysis_by_hp_24/pyspark_dataproc_testing/bronze/dynamic_methods.py --properties="spark.executor.memory=2g,spark.driver.memory=2g"
 
-
-
-    
 # spark-submit \
 #   --jars "C:/Users/harsh/Downloads/gcs-connector-hadoop2-2.2.0.jar,C:/Users/harsh/Downloads/spark-bigquery-with-dependencies_2.13-0.41.0.jar,C:/spark/spark-3.3.2-bin-hadoop2/jars/hadoop-common-2.7.4.jar" \
 #   --conf "spark.hadoop.google.cloud.auth.service.account.enable=true" \
@@ -173,10 +169,3 @@ if __name__ == '__main__':
 #   --conf "spark.executor.memory=2g" \
 #   --conf "spark.driver.memory=2g" \
 #   'C:\Users\harsh\Downloads\Study\Spark Lectures\Projects\earthquake_ingesion_hp\dataproc copy\dataproc_load_historical_data_as_parquet.py'
-
-
-
-
-
-
-

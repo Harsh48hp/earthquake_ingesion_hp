@@ -70,35 +70,32 @@ def flatten_json(data: dict) -> dict:
     return data
 
 def main():
-    # Composer does not use Spark directly, but we will use it to generate the necessary data.
-    # Dataproc or Databricks will handle the Spark processing
-
-    # Step 2: Fetch earthquake data from the API
+    # Step 1: Fetch earthquake data from the API
     url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.geojson"
     data = request_url(url)
     
-    # Step 3: creating a new GCS bucket (ensure this bucket already exists)
+    # Step 2: creating a new GCS bucket (ensure this bucket already exists)
     bucket_name = 'earthquake_analysis_by_hp_24'
     creating_bucket_object = create_bucket(bucket_name)
     
-    # Step 4: Upload raw data to Google Cloud Storage (GCS)
+    # Step 3: Upload raw data to Google Cloud Storage (GCS)
     str_date = datetime.now().strftime('%Y%m%d')
     folder_path = "composer/landing/"
     json_data = json.dumps(data)
     destination_blob_name = f'historical_data_{str_date}.json'
     upload_to_gcs(bucket_name, json_data, destination_blob_name, folder_path)
 
-    # Step 5: Read the uploaded JSON data from GCS
+    # Step 4: Read the uploaded JSON data from GCS
     blob_name = f'composer/landing/{destination_blob_name}'
     gcs_json_data = read_json_from_gcs(bucket_name, blob_name)
 
-    # Step 6: Extract the 'features' section from the JSON response
+    # Step 5: Extract the 'features' section from the JSON response
     earthquake_records = gcs_json_data['features']
     
-    # Step 7: Process the data into a list of flattened records
+    # Step 6: Process the data into a list of flattened records
     processed_records = [flatten_json(extract_properties(records)) for records in earthquake_records]
 
-    # Step 8: Define the schema for the DataFrame
+    # Step 7: Define the schema for the DataFrame
     earthquake_schema = StructType([
         StructField("mag", FloatType(), True),
         StructField("place", StringType(), True),
@@ -131,14 +128,14 @@ def main():
         StructField("depth", FloatType(), True)
     ])
 
-    # Step 9: Create the DataFrame with the flattened data and schema
+    # Step 8: Create the DataFrame with the flattened data and schema
     spark = SparkSession.builder.appName('EarthquakeDataProcessing') \
             .config("spark.jars", "gs://earthquake_analysis_by_hp_24/composer/historical_data/spark-bigquery-with-dependencies_2.13-0.41.0.jar") \
             .getOrCreate()
     
     earthquake_df = spark.createDataFrame(processed_records, earthquake_schema)
 
-    # Step 10: Perform transformations on the DataFrame
+    # Step 9: Perform transformations on the DataFrame
     earthquake_df = earthquake_df.withColumn('time', from_unixtime(col('time').cast('long')/1000, format="yyyy-MM-dd HH:mm:ss")) \
                                    .withColumn('updated', from_unixtime(col('updated').cast('long')/1000, format="yyyy-MM-dd HH:mm:ss")) \
                                    .withColumn('area',
@@ -146,18 +143,18 @@ def main():
                                                 .otherwise(col("place"))) \
                                    .withColumn('ingestion_dt', current_timestamp())
 
-    # Step 11: Show the DataFrame and its schema
+    # Step 10: Show the DataFrame and its schema
     earthquake_df.show(truncate=False)
     earthquake_df.printSchema()
 
-    # Step 12: Upload transformed data to Google Cloud Storage (GCS) as Parquet
+    # Step 11: Upload transformed data to Google Cloud Storage (GCS) as Parquet
     folder_path = "composer/Silver/parquet/"
     destination_blob_name = f'flattened_and_transformed_historical_data_{str_date}.parquet'
     gcs_path = f'gs://{bucket_name}/{folder_path}{destination_blob_name}'
     write_df_to_gcs_parquet(earthquake_df, bucket_name, folder_path, destination_blob_name)
     print(f"DataFrame successfully written to {gcs_path}")
     
-    # Step 13: Loading the data from GCS to BigQuery
+    # Step 12: Loading the data from GCS to BigQuery
     project_id = "earthquake-analysis-440806"
     dataset_id = "earthquake_analysis"
     table_id = f"{project_id}.{dataset_id}.flattned_data_by_parquet_by_composer_dataproc"
