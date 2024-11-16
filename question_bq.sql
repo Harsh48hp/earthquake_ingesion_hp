@@ -1,7 +1,6 @@
 select time from earthquake-analysis-440806.earthquake_analysis.new_flattened_historical_data_by_parquet;
 
 
-
 --- 1. Count the number of earthquakes by region
 
 select area , count(*) number_of_earthquakes from earthquake-analysis-440806.earthquake_analysis.new_flattened_historical_data_by_parquet group by area order by number_of_earthquakes;
