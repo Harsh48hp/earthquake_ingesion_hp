@@ -1,3 +1,12 @@
+###########################################################################################################
+"""
+file_name = dynamic_methods.py
+description = dynamic functions used for the transformation of the data
+date = 2024/11/02
+version = 1
+
+"""
+############################################################################################################
 import apache_beam as beam
 from util import request_url
 from datetime import datetime

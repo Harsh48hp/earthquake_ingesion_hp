@@ -14,7 +14,7 @@ import json
 from datetime import datetime
 from pyspark.sql import SparkSession
 from google.cloud import bigquery
-from util import read_json_from_gcs
+from dataproc.util import read_json_from_gcs
 
 
 # Set the environment for Google Cloud authentication

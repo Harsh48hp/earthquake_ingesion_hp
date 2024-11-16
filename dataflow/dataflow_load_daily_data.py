@@ -1,7 +1,7 @@
 ###########################################################################################################
 """
-file_name = dataflow_load_historical_data.py
-description = flow of code to upload a historical earthquake analysis data to bigquery
+file_name = dataflow_load_daily_data.py
+description = flow of code to upload a daily earthquake analysis data to bigquery
 date = 2024/11/02
 version = 1
 
@@ -76,7 +76,7 @@ def process_and_transform_data(pipeline, bucket_name, destination_blob_name):
 def write_to_gcs_as_parquet(pipeline, lines, bucket_name, str_date):
     # Step 4: Write Transformed Data to GCS as Parquet
     logging.info("Step 4: Writing transformed data to GCS as Parquet")
-    destination_parquet_blob_name = f'dataflow/silver/{str_date}/historical_flatten_data_{str_date}.parquet'
+    destination_parquet_blob_name = f'dataflow/silver/daily/{str_date}/daily_flatten_data_{str_date}.parquet'
 
     # Define the schema for Parquet file
     parquet_schema = SchemaConverter.get_pyarrow_parquet_schema()
@@ -95,7 +95,7 @@ def write_to_gcs_as_parquet(pipeline, lines, bucket_name, str_date):
 def write_to_bigquery(pipeline, bucket_name):
     # Step 5: Write Parquet Data from GCS to BigQuery
     logging.info("Step 5: Writing Parquet data from GCS to BigQuery")
-    gcs_uri = f"gs://{bucket_name}/dataflow/silver/{datetime.now().strftime('%Y%m%d')}/"
+    gcs_uri = f"gs://{bucket_name}/dataflow/silver/daily/{datetime.now().strftime('%Y%m%d')}/"
     
     # Define the schema for BigQuery table
     bq_schema = SchemaConverter.get_bigquery_schema()
@@ -106,7 +106,7 @@ def write_to_bigquery(pipeline, bucket_name):
         | 'Write Parquet Data to BigQuery' >> beam.io.WriteToBigQuery(
             table="earthquake-analysis-440806.earthquake_analysis.flattened_historical_parquet_data_by_dataflow_with_audit_table",
             schema=bq_schema,
-            write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE,  # Overwrite existing data
+            write_disposition=beam.io.BigQueryDisposition.WRITE_APPEND,  # Append existing data
             create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED  # Create table if not exists
         )
     )
@@ -154,7 +154,7 @@ def run_pipeline():
     logging.basicConfig(level=logging.INFO)
 
     # Define the source URL for earthquake data
-    url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.geojson"
+    url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"
     logging.info(f"Data source URL: {url}")
     
     # Create a GCS bucket (if not already created)
@@ -164,7 +164,7 @@ def run_pipeline():
     
     # Define the destination path and file name
     str_date = datetime.now().strftime('%Y%m%d')
-    destination_blob_name = f'dataflow/landing/historical_data_{str_date}.json'
+    destination_blob_name = f'dataflow/landing/daily_data_{str_date}.json'
     
     """Run the pipeline with audit logging."""
 
@@ -230,24 +230,3 @@ def run_pipeline():
 
 if __name__ == '__main__':
     run_pipeline()
-
-
-
-
-
-
-
-
-
-
-'''CREATE TABLE `earthquake-analysis-440806.earthquake_analysis.audit_table_dataflow` (
-    pipeline_run_id STRING,
-    pipeline_name STRING,
-    step_name STRING,
-    status STRING,  -- e.g. 'SUCCESS', 'FAILURE'
-    error_message STRING,  -- Optional, for failure cases
-    start_time TIMESTAMP,
-    end_time TIMESTAMP,
-    execution_timestamp TIMESTAMP,
-    additional_info STRING  -- Optional, for any extra details (e.g. API response time)
-);'''

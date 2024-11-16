@@ -1,3 +1,13 @@
+###########################################################################################################
+"""
+file_name = schema_data.py
+description = flow of code to upload a historical earthquake analysis data to bigquery
+date = 2024/11/02
+version = 1
+
+"""
+############################################################################################################
+
 import pyarrow
 
 class SchemaConverter:

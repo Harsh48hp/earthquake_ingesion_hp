@@ -1,3 +1,12 @@
+###########################################################################################################
+"""
+file_name = util.py
+description = utility folder containg all the necessary functions for historical data to upload to bigquery
+date = 2024/11/02
+version = 1
+
+"""
+############################################################################################################
 import requests
 import logging
 from google.cloud import storage, bigquery
